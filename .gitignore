@@ -1,0 +1,6 @@
+# Ignore all .env files
+*.env
+
+# Other rules
+__pycache__/
+*.pyc
