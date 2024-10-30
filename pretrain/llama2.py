@@ -1,7 +1,6 @@
 import torch.nn as nn
 import torch
 
-
 class MultiHeadAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -19,12 +18,12 @@ class MultiHeadAttention(nn.Module):
         self.register_buffer('mask', torch.triu(torch.ones(config['context_length'], 
                                                             config['context_length']), diagonal = 1))
 
-        cos, sin = self.precompute_rope_params(head_dim = self.head_dim, context_length = config["context_length"])
+        cos, sin = self._precompute_rope_params(self.head_dim, 10_000, config["context_length"])
 
         self.register_buffer("cos", cos)
         self.register_buffer("sin", sin)
 
-    def precompute_rope_params(head_dim, theta_base=10_000, context_length=4096):
+    def _precompute_rope_params(self, head_dim, theta_base=10_000, context_length=4096):
         assert head_dim % 2 == 0, "Embedding dimension must be even"
 
         inv_freq = 1.0 / (theta_base ** (torch.arange(0, head_dim, 2)[: (head_dim // 2)].float() / head_dim))
@@ -40,7 +39,7 @@ class MultiHeadAttention(nn.Module):
 
         return cos, sin
 
-    def compute_rope(x, cos, sin):
+    def _compute_rope(self, x, cos, sin):
         # x: (batch_size, num_heads, seq_len, head_dim)
         batch_size, num_heads, seq_len, head_dim = x.shape
         assert head_dim % 2 == 0, "Head dimension must be even"
@@ -58,7 +57,7 @@ class MultiHeadAttention(nn.Module):
         x_rotated = (x * cos) + (rotated * sin)
 
         return x_rotated.to(dtype=x.dtype)
-    
+
     def forward(self, x):
         batch_size, num_tokens, d_in = x.shape
 
@@ -75,8 +74,8 @@ class MultiHeadAttention(nn.Module):
         values = values.transpose(1, 2)
 
         # RoPE Embedding
-        keys = self.compute_rope(keys, self.cos, self.sin)
-        queries = self.compute_rope(queries, self.cos, self.sin)
+        keys = self._compute_rope(keys, self.cos, self.sin)
+        queries = self._compute_rope(queries, self.cos, self.sin)
 
         #QK^T
         attn_scores = queries @ keys.transpose(2, 3)
@@ -107,8 +106,8 @@ class SiLU(nn.Module):
 class FeedForward(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ffn_1 = nn.Linear(config['emb_dim'], config['hidden_dim'], dtpye = config["dtype"], bias = False)
-        self.ffn_2 = nn.Linear(config['emb_dim'], config['hidden_dim'], dtpye = config["dtype"], bias = False)
+        self.ffn_1 = nn.Linear(config['emb_dim'], config['hidden_dim'], dtype = config["dtype"], bias = False)
+        self.ffn_2 = nn.Linear(config['emb_dim'], config['hidden_dim'], dtype = config["dtype"], bias = False)
         self.ffn_3 = nn.Linear(config["hidden_dim"], config["emb_dim"], dtype = config["dtype"], bias = False)
         self.silu = SiLU()
 
@@ -119,9 +118,9 @@ class FeedForward(nn.Module):
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, config, eps = 1e-5):
+    def __init__(self, emb_dim, eps = 1e-5):
         super().__init__()
-        self.emb_dim = config['emb_dim']
+        self.emb_dim = emb_dim
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(self.emb_dim)).float()
     
@@ -162,7 +161,7 @@ class Llama2Model(nn.Module):
     
     def forward(self, in_idx):
         batch_size, seq_len = in_idx.shape
-        
+
         tok_emb = self.token_emb(in_idx)
 
         x = tok_emb
